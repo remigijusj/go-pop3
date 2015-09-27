@@ -95,6 +95,26 @@ func (c *Client) Retr(number int) (string, error) {
 	return c.Text.ReadToPeriod()
 }
 
+// Top issues a TOP command to the server using the provided mail number and number of lines
+// and returns mail headers with the specified number of body lines.
+func (c *Client) Top(number, body_lines int) (string, error) {
+	var err error
+
+	err = c.Text.WriteLine("TOP %d %d", number, body_lines)
+
+	if err != nil {
+		return "", err
+	}
+
+	_, err = c.Text.ReadResponse()
+
+	if err != nil {
+		return "", err
+	}
+
+	return c.Text.ReadToPeriod()
+}
+
 // List issues a LIST command to the server using the provided mail number
 // and returns mail number and size.
 func (c *Client) List(number int) (int, uint64, error) {
@@ -199,6 +219,58 @@ func (c *Client) Rset() error {
 func (c *Client) Quit() error {
 	return c.cmdSimple("QUIT")
 }
+
+// ScanMail connects to the server at addr,
+// and authenticates with user and pass,
+// and calling messageFn for each mail.
+func ScanMail(addr, user, pass string, messageFn ScanMailFunc) error {
+	c, err := Dial(addr)
+
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil && err != EOF {
+			c.Rset()
+		}
+
+		c.Quit()
+		c.Close()
+	}()
+
+	if err = c.User(user); err != nil {
+		return err
+	}
+
+	if err = c.Pass(pass); err != nil {
+		return err
+	}
+
+	var mis []MessageInfo
+
+	if mis, err = c.UidlAll(); err != nil {
+		return err
+	}
+
+	for _, mi := range mis {
+		err := messageFn(c, mi.Number, mi.Uid)
+
+		if err == EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ScanMailFunc is the type of the function called for each mail.
+// Its arguments are mail's number and uid.
+// If it returns EOF, skip the all mail of remaining.
+type ScanMailFunc func(c *Client, number int, uid string) (error)
 
 // ReceiveMail connects to the server at addr,
 // and authenticates with user and pass,
